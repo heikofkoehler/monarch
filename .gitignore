@@ -1,0 +1,39 @@
+# Credentials
+credentials.json
+.env
+.env.local
+
+# Generated data files
+portfolio.json
+portfolio_holdings.csv
+holdings.csv
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.session.json
