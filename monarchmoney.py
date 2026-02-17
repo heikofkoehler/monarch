@@ -793,6 +793,132 @@ class MonarchMoney(object):
             operation="Web_GetHoldings",
             graphql_query=query,
             variables=variables,
+        )    
+    
+    async def get_portfolio(self) -> Dict[str, Any]:
+        """
+        Get the entire investment portfolio.
+        """
+        query = gql(
+            """
+            query Web_GetPortfolio($portfolioInput: PortfolioInput) {
+              portfolio(input: $portfolioInput) {
+                performance {
+                  totalValue
+                  totalBasis
+                  totalChangePercent
+                  totalChangeDollars
+                  oneDayChangePercent
+                  historicalChart {
+                    date
+                    returnPercent
+                    __typename
+                  }
+                  benchmarks {
+                    security {
+                      id
+                      ticker
+                      name
+                      oneDayChangePercent
+                      __typename
+                    }
+                    historicalChart {
+                      date
+                      returnPercent
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                aggregateHoldings {
+                  edges {
+                    node {
+                      id
+                      quantity
+                      basis
+                      totalValue
+                      securityPriceChangeDollars
+                      securityPriceChangePercent
+                      lastSyncedAt
+                      holdings {
+                        id
+                        type
+                        typeDisplay
+                        name
+                        ticker
+                        closingPrice
+                        closingPriceUpdatedAt
+                        quantity
+                        value
+                        account {
+                          id
+                          mask
+                          icon
+                          logoUrl
+                          institution {
+                            id
+                            name
+                            __typename
+                          }
+                          type {
+                            name
+                            display
+                            __typename
+                          }
+                          subtype {
+                            name
+                            display
+                            __typename
+                          }
+                          displayName
+                          currentBalance
+                          __typename
+                        }
+                        taxLots {
+                          id
+                          createdAt
+                          acquisitionDate
+                          acquisitionQuantity
+                          costBasisPerUnit
+                          __typename
+                        }
+                        __typename
+                      }
+                      security {
+                        id
+                        name
+                        ticker
+                        currentPrice
+                        currentPriceUpdatedAt
+                        closingPrice
+                        type
+                        typeDisplay
+                        __typename
+                      }
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+            }
+        """
+        )
+
+        variables = {
+            "portfolioInput": {
+                "endDate": datetime.today().strftime("%Y-%m-%d"),
+                "startDate": datetime.today().strftime("%Y-%m-%d"),
+            },
+        }
+
+        return await self.gql_call(
+            operation="Web_GetPortfolio",
+            graphql_query=query,
+            variables=variables,
         )
 
     async def get_account_history(self, account_id: int) -> Dict[str, Any]:

@@ -36,25 +36,10 @@ async def sync_monarch_to_sheets():
         print(f"Failed to login: {e}")
         raise
 
-    # 2. Fetch all account data
-    accounts = await mm.get_accounts()
-    
-    # 3. Format data for Google Sheets
-    # Filtering for your primary investment accounts or specific balances
-    rows = [["Account Name", "Type", "Holding", "Value"]]  # Header row
-    for acc in accounts:
-        id = acc['id']
-        # Focusing on your high-net-worth investment accounts
-        if acc['type']['name'] in ['Investment', 'Equity']:
-            # Fetching holdings for each account to get more detailed information
-            holdings = await mm.get_holdings(id)
-            for holding in holdings:
-                rows.append([acc['display_name'], acc['type']['name'], holding['name'], holding['value']])  # Add each holding row
-    
-    # 4. Dump to CSV file
-    with open('monarch_data.csv', 'w') as f:
-        for row in rows:
-            f.write(','.join(map(str, row)) + '\n')
+    # 2. Fetch entire investment portfolio and save to JSON
+    portfolio = await mm.get_portfolio()
+    with open("portfolio.json", "w") as outfile:
+        json.dump(portfolio, outfile, indent=4)
 
     print("Sync Complete!")
 
