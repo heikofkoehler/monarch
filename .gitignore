@@ -8,6 +8,7 @@ portfolio.json
 portfolio_holdings.csv
 holdings.csv
 *.csv
+*.json
 
 # Python
 __pycache__/
