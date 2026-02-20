@@ -38,3 +38,8 @@ Thumbs.db
 
 # Project specific
 *.session.json
+
+# Go
+/go/monarch
+go.sum
+.mm/
