@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -165,6 +166,7 @@ func cmdFetch(args []string) error {
 	csvFile := fs.String("csv", "", "Output CSV filename for holdings (optional)")
 	noSession := fs.Bool("no-session", false, "Skip saved session and always re-authenticate")
 	token := fs.String("token", "", "Auth token (skips login; use token from browser DevTools)")
+	useGoogle := fs.Bool("google", false, "Authenticate via Google SSO (opens browser)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: monarch fetch [options]")
 		fs.PrintDefaults()
@@ -174,10 +176,29 @@ func cmdFetch(args []string) error {
 	}
 
 	c := client.New()
-	if *token != "" {
+	ctx := context.Background()
+	switch {
+	case *token != "":
 		c.SetToken(*token)
-	} else if err := authenticate(c, *credsPath, !*noSession); err != nil {
-		return err
+	case *useGoogle:
+		if !*noSession {
+			if loaded, err := c.LoadSession(); err != nil {
+				return fmt.Errorf("load session: %w", err)
+			} else if loaded {
+				fmt.Println("Using saved session.")
+				break
+			}
+		}
+		if err := c.LoginWithGoogle(ctx); err != nil {
+			return err
+		}
+		if err := c.SaveSession(); err != nil {
+			return fmt.Errorf("save session: %w", err)
+		}
+	default:
+		if err := authenticate(c, *credsPath, !*noSession); err != nil {
+			return err
+		}
 	}
 
 	raw, err := fetchPortfolio(c)
@@ -259,6 +280,7 @@ func cmdPipeline(args []string) error {
 	skipFetch := fs.Bool("skip-fetch", false, "Skip fetching, only parse existing JSON")
 	noSession := fs.Bool("no-session", false, "Skip saved session and always re-authenticate")
 	token := fs.String("token", "", "Auth token (skips login; use token from browser DevTools)")
+	useGoogle := fs.Bool("google", false, "Authenticate via Google SSO (opens browser)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: monarch pipeline [options]")
 		fs.PrintDefaults()
@@ -275,6 +297,9 @@ func cmdPipeline(args []string) error {
 		}
 		if *token != "" {
 			fetchArgs = append(fetchArgs, "-token", *token)
+		}
+		if *useGoogle {
+			fetchArgs = append(fetchArgs, "-google")
 		}
 		if err := cmdFetch(fetchArgs); err != nil {
 			return fmt.Errorf("fetch step: %w", err)

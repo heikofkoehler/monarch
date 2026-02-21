@@ -2,23 +2,50 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const (
-	baseURL      = "https://api.monarch.com"
-	loginURL     = baseURL + "/auth/login/"
-	graphqlURL   = baseURL + "/graphql"
-	sessionFile  = ".mm/session.json"
-	userAgent    = "MonarchMoneyAPI (https://github.com/hammem/monarchmoney)"
+	baseURL     = "https://api.monarch.com"
+	loginURL    = baseURL + "/auth/login/"
+	graphqlURL  = baseURL + "/graphql"
+	sessionFile = ".mm/session.json"
+	userAgent   = "MonarchMoneyAPI (https://github.com/hammem/monarchmoney)"
 )
+
+// consoleSnippet extracts the Monarch session token and copies it to the clipboard.
+const consoleSnippet = `(function(){
+  let token = "";
+  try {
+    const root = JSON.parse(localStorage.getItem("persist:root") || "{}");
+    token = JSON.parse(root.user || "{}").token || "";
+  } catch(e) {}
+  if (!token) {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k);
+      if (k && k.toLowerCase().includes("token") && v && v.length > 20 && !v.startsWith("{")) {
+        token = v; break;
+      }
+    }
+  }
+  if (!token) { console.error("Token not found — are you logged in?"); return; }
+  navigator.clipboard.writeText(token).then(
+    () => console.log("Token copied to clipboard!"),
+    () => { console.log("Copy failed — token is:"); console.log(token); }
+  );
+})()`
 
 // Client holds auth state and HTTP configuration for the Monarch Money API.
 type Client struct {
@@ -44,11 +71,11 @@ func (c *Client) Token() string {
 }
 
 type loginRequest struct {
-	Password    string `json:"password"`
-	SupportsMFA bool   `json:"supports_mfa"`
-	TrustedDevice bool `json:"trusted_device"`
-	Username    string `json:"username"`
-	TOTP        string `json:"totp,omitempty"`
+	Password      string `json:"password"`
+	SupportsMFA   bool   `json:"supports_mfa"`
+	TrustedDevice bool   `json:"trusted_device"`
+	Username      string `json:"username"`
+	TOTP          string `json:"totp,omitempty"`
 }
 
 type loginResponse struct {
@@ -59,7 +86,7 @@ type sessionData struct {
 	Token string `json:"token"`
 }
 
-// Login authenticates with Monarch Money.
+// Login authenticates with Monarch Money using email and password.
 // If the server responds with 403, it returns ErrMFARequired.
 func (c *Client) Login(email, password, totp string) error {
 	req := loginRequest{
@@ -93,8 +120,8 @@ func (c *Client) Login(email, password, totp string) error {
 		return ErrMFARequired
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("login failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("login failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	var lr loginResponse
@@ -110,6 +137,42 @@ func (c *Client) Login(email, password, totp string) error {
 
 // ErrMFARequired is returned by Login when MFA is required.
 var ErrMFARequired = fmt.Errorf("multi-factor authentication required")
+
+// LoginWithGoogle opens app.monarch.com in Chrome, prints a JavaScript snippet
+// the user runs in the browser console to copy their Monarch token to the clipboard,
+// then reads the token automatically from the clipboard via pbpaste.
+func (c *Client) LoginWithGoogle(ctx context.Context) error {
+	fmt.Println("Opening app.monarch.com in Chrome...")
+	fmt.Println()
+	fmt.Println("Once the page loads:")
+	fmt.Println("  1. Open the browser console  (Cmd+Option+J)")
+	fmt.Println("  2. Paste the snippet below and press Enter")
+	fmt.Println("     → It will copy your Monarch token to the clipboard")
+	fmt.Println()
+	fmt.Println(consoleSnippet)
+	fmt.Println()
+
+	_ = openBrowser("https://app.monarch.com")
+
+	prompt("Press Enter after the console says \"Token copied to clipboard!\"...")
+
+	out, err := exec.Command("pbpaste").Output()
+	if err != nil {
+		// pbpaste not available (non-macOS) — fall back to manual paste.
+		token := prompt("Paste token here: ")
+		if token == "" {
+			return fmt.Errorf("no token provided")
+		}
+		c.token = token
+		return nil
+	}
+	token := strings.TrimSpace(string(out))
+	if token == "" {
+		return fmt.Errorf("clipboard is empty — did the snippet run successfully?")
+	}
+	c.token = token
+	return nil
+}
 
 // SaveSession writes the auth token to disk.
 func (c *Client) SaveSession() error {
@@ -188,8 +251,8 @@ func (c *Client) GraphQLCall(operationName, query string, variables map[string]a
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("graphql HTTP %d: %s\n%s", resp.StatusCode, resp.Status, body)
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("graphql HTTP %d: %s\n%s", resp.StatusCode, resp.Status, b)
 	}
 
 	var envelope struct {
@@ -214,5 +277,28 @@ func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", userAgent)
 	if c.token != "" {
 		req.Header.Set("Authorization", "Token "+c.token)
+	}
+}
+
+func prompt(label string) string {
+	fmt.Fprint(os.Stdout, label)
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Scan()
+	return strings.TrimSpace(sc.Text())
+}
+
+// openBrowser opens the given URL, preferring Chrome on macOS.
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		// Prefer Chrome; fall back to system default if not installed.
+		if err := exec.Command("open", "-a", "Google Chrome", url).Start(); err == nil {
+			return nil
+		}
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
 	}
 }
